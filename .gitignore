@@ -1,0 +1,14 @@
+
+
+
+# .gitignore
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+node_modules/
+.next/
+*.egg-info/
+dist/
+.DS_Store
