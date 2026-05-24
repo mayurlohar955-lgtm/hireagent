@@ -1,49 +1,45 @@
-﻿
-
-"use client"
+﻿"use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
 
 const STAGES = ["applied","screening","interview","offer","hired","rejected"]
-const STAGE_COLORS: Record<string, {bg:string,text:string,border:string}> = {
-  applied:   { bg:"#eef2ff", text:"#4338ca", border:"#c7d2fe" },
-  screening: { bg:"#fffbeb", text:"#b45309", border:"#fde68a" },
-  interview: { bg:"#eff6ff", text:"#1d4ed8", border:"#bfdbfe" },
-  offer:     { bg:"#f5f3ff", text:"#6d28d9", border:"#ddd6fe" },
-  hired:     { bg:"#ecfdf5", text:"#065f46", border:"#a7f3d0" },
-  rejected:  { bg:"#fef2f2", text:"#991b1b", border:"#fecaca" },
+const STAGE_COLORS: Record<string,{bg:string,text:string,border:string}> = {
+  applied:   {bg:"#eef2ff",text:"#4338ca",border:"#c7d2fe"},
+  screening: {bg:"#fffbeb",text:"#b45309",border:"#fde68a"},
+  interview: {bg:"#eff6ff",text:"#1d4ed8",border:"#bfdbfe"},
+  offer:     {bg:"#f5f3ff",text:"#6d28d9",border:"#ddd6fe"},
+  hired:     {bg:"#ecfdf5",text:"#065f46",border:"#a7f3d0"},
+  rejected:  {bg:"#fef2f2",text:"#991b1b",border:"#fecaca"},
 }
 
-const MOCK_BOARD: Record<string, any[]> = {
+const MOCK_BOARD: Record<string,any[]> = {
   applied:   [{application_id:"a1",candidate_id:"c1",name:"Priya Sharma",email:"priya@email.com",experience_years:4,skills:["Python","FastAPI","Docker"],score_total:0,screened:false,strengths:[],gaps:[],reasoning:""}],
   screening: [{application_id:"a2",candidate_id:"c2",name:"Rahul Desai",email:"rahul@email.com",experience_years:6,skills:["Python","AWS","Kubernetes"],score_total:87,score_skills:90,score_experience:85,score_relevance:86,screened:true,strengths:["Strong AWS expertise","Kubernetes in production"],gaps:["No gRPC experience"],reasoning:"Excellent match."}],
   interview: [{application_id:"a3",candidate_id:"c3",name:"Anjali Menon",email:"anjali@email.com",experience_years:5,skills:["Python","FastAPI","PostgreSQL","Redis"],score_total:92,score_skills:94,score_experience:90,score_relevance:92,screened:true,strengths:["Direct FastAPI experience","PostgreSQL at scale"],gaps:["Limited ML experience"],reasoning:"Outstanding technical fit."}],
   offer:[],hired:[],rejected:[],
 }
 
-function getToken() { return typeof window !== "undefined" ? localStorage.getItem("hr_token") : null }
-// function getStoredUser() { try { return typeof window !== "undefined" ? JSON.parse(localStorage.getItem("hr_user")||"{}") : {} } catch { return {} } }
-// function getStoredCompany() { try { return typeof window !== "undefined" ? JSON.parse(localStorage.getItem("hr_company")||"{}") : {} } catch { return {} } }
+function getToken() { return typeof window!=="undefined" ? localStorage.getItem("hr_token") : null }
 
-async function apiCall(url: string, options: RequestInit = {}) {
+async function apiCall(url:string, options:RequestInit={}) {
   const token = getToken()
   const res = await fetch(url, {
     ...options,
     headers: {
-      ...(options.body instanceof FormData ? {} : {"Content-Type": "application/json"}),
+      ...(options.body instanceof FormData ? {} : {"Content-Type":"application/json"}),
       "Authorization": `Bearer ${token}`,
-      ...(options.headers || {}),
+      ...(options.headers||{}),
     },
   })
-  if (res.status === 402) {
+  if (res.status===402) {
     const data = await res.json()
-    alert(`Access blocked: ${data.detail}\n\nContact mayur@youremail.com to upgrade.`)
+    alert(`Access blocked: ${data.detail}\n\nContact us to upgrade.`)
     return null
   }
-  if (res.status === 401) {
+  if (res.status===401) {
     localStorage.clear()
-    document.cookie = "hr_token=;path=/;max-age=0"
-    window.location.href = "/auth"
+    document.cookie="hr_token=;path=/;max-age=0"
+    window.location.href="/auth"
     return null
   }
   return res
@@ -103,10 +99,26 @@ function CandidateCard({card,isDragging,onDragStart}:{card:any,isDragging:boolea
   )
 }
 
-function PipelineBoard() {
-  const [board,setBoard]=useState(MOCK_BOARD)
-  const [dragging,setDragging]=useState<any>(null)
-  const [dragOver,setDragOver]=useState<string|null>(null)
+function PipelineBoard({jobId}:{jobId?:string}) {
+  const [board,setBoard]     = useState(MOCK_BOARD)
+  const [dragging,setDragging] = useState<any>(null)
+  const [dragOver,setDragOver] = useState<string|null>(null)
+
+  useEffect(()=>{
+    if(!jobId) return
+    const token = getToken()
+    fetch(`/api/v1/pipeline/${jobId}/board`,{headers:{"Authorization":`Bearer ${token}`}})
+      .then(r=>r.json())
+      .then(data=>{
+        if(data.columns){
+          const nb:Record<string,any[]>={}
+          data.columns.forEach((col:any)=>{ nb[col.stage]=col.cards||[] })
+          setBoard(nb)
+        }
+      })
+      .catch(()=>{})
+  },[jobId])
+
   return (
     <div style={{display:"flex",gap:12,overflowX:"auto",padding:"4px 0 16px"}}>
       {STAGES.map(stage=>{
@@ -145,7 +157,7 @@ function PipelineBoard() {
   )
 }
 
-function JDWriter() {
+function JDWriter({onJobCreated}:{onJobCreated?:(id:string)=>void}) {
   const [form,setForm]=useState({title:"",department:"",location:"",employment_type:"full-time",experience_min:2,experience_max:6,skills:"",salary_min:"",salary_max:"",additional_context:""})
   const [result,setResult]=useState<any>(null)
   const [loading,setLoading]=useState(false)
@@ -155,23 +167,23 @@ function JDWriter() {
     if(!form.title||!form.department||!form.skills){setError("Title, department and skills are required");return}
     setError("");setLoading(true);setResult(null)
     try {
-      const token=getToken()
-      const res = await apiCall("/api/v1/jobs/generate", {
-        method: "POST",
-        body: JSON.stringify({
+      const res = await apiCall("/api/v1/jobs/generate",{
+        method:"POST",
+        body:JSON.stringify({
           ...form,
-          skills: form.skills.split(",").map((s:string) => s.trim()).filter(Boolean),
-          experience_min: Number(form.experience_min),
-          experience_max: Number(form.experience_max),
-          salary_min: form.salary_min ? Number(form.salary_min) : null,
-          salary_max: form.salary_max ? Number(form.salary_max) : null,
+          skills:form.skills.split(",").map((s:string)=>s.trim()).filter(Boolean),
+          experience_min:Number(form.experience_min),
+          experience_max:Number(form.experience_max),
+          salary_min:form.salary_min?Number(form.salary_min):null,
+          salary_max:form.salary_max?Number(form.salary_max):null,
         })
       })
-      
-      if (!res) { setLoading(false); return }
-      if (!res.ok) throw new Error(`${res.status}`)
-      setResult(await res.json())
-    } catch(e) {
+      if(!res){setLoading(false);return}
+      if(!res.ok){throw new Error(`${res.status}`)}
+      const data = await res.json()
+      setResult(data)
+      if(data.job?.id && onJobCreated) onJobCreated(data.job.id)
+    } catch(e){
       setError("Could not reach API. Is the backend running?")
     }
     setLoading(false)
@@ -232,35 +244,43 @@ function JDWriter() {
   )
 }
 
-function ResumeScreener() {
-  const [jobId,setJobId]=useState("")
-  const [files,setFiles]=useState<File[]>([])
-  const [results,setResults]=useState<any[]>([])
-  const [screening,setScreening]=useState(false)
-  const [dragOver,setDragOver]=useState(false)
-  const fileRef=useRef<HTMLInputElement>(null)
+function ResumeScreener({initialJobId=""}:{initialJobId?:string}) {
+  const [jobId,setJobId]     = useState(initialJobId)
+  const [files,setFiles]     = useState<File[]>([])
+  const [results,setResults] = useState<any[]>([])
+  const [screening,setScreening] = useState(false)
+  const [dragOver,setDragOver]   = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(()=>{ if(initialJobId) setJobId(initialJobId) },[initialJobId])
 
   const handleDrop=useCallback((e:React.DragEvent)=>{
     e.preventDefault();setDragOver(false)
     setFiles(prev=>[...prev,...Array.from(e.dataTransfer.files).filter(f=>f.name.endsWith(".pdf"))])
   },[])
 
-  const handleScreen=async()=>{
+  const handleScreen = async () => {
     if(!jobId){alert("Enter a Job ID first");return}
     setScreening(true)
-    const formData=new FormData()
-    for(const f of files) formData.append("files",f)
+    const formData = new FormData()
+    for(const f of files) formData.append("files", f)
     try {
-      
-      const res = await apiCall(`/api/v1/candidates/bulk-upload/${jobId}`,{
-        method:"POST",
-        body:formData,
+      const token = getToken()
+
+      // Upload directly to backend — bypass Next.js proxy for file uploads
+      const res = await fetch(`http://localhost:8000/api/v1/candidates/bulk-upload/${jobId}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+        body: formData,
       })
-      if(!res) return
+      if(!res.ok){ alert("Upload failed: " + res.status); setScreening(false); return }
       await res.json()
-      await new Promise(r=>setTimeout(r,3000))
+
+      await new Promise(r => setTimeout(r, 3000))
+
+    // Ranked results can go through proxy normally
       const ranked = await apiCall(`/api/v1/candidates/${jobId}/ranked`)
-      if(!ranked) return
+      if(!ranked){ setScreening(false); return }
       setResults(await ranked.json())
     } catch(e){
       alert("API error. Is backend running?")
@@ -273,7 +293,7 @@ function ResumeScreener() {
       <div>
         <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,marginBottom:12}}>
           <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>Job ID</label>
-          <input style={{width:"100%",padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:7,fontSize:13,boxSizing:"border-box"}} value={jobId} onChange={e=>setJobId(e.target.value)} placeholder="Paste job id from JD Writer"/>
+          <input style={{width:"100%",padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:7,fontSize:13,boxSizing:"border-box"}} value={jobId} onChange={e=>setJobId(e.target.value)} placeholder="Auto-filled after JD generation"/>
         </div>
         <div onDrop={handleDrop} onDragOver={e=>{e.preventDefault();setDragOver(true)}} onDragLeave={()=>setDragOver(false)} onClick={()=>fileRef.current?.click()}
           style={{border:`2px dashed ${dragOver?"#6366f1":"#d1d5db"}`,borderRadius:12,padding:"28px 20px",textAlign:"center",background:dragOver?"#eef2ff":"#fafafa",cursor:"pointer",marginBottom:12}}>
@@ -332,9 +352,10 @@ function ResumeScreener() {
 }
 
 export default function HRAgent() {
-  const [tab,setTab]=useState("jd")
-  const [user,setUser]=useState<{full_name?:string}>({})
-  const [company,setCompany]=useState<{name?:string}>({})
+  const [tab,setTab]               = useState("jd")
+  const [lastJobId,setLastJobId]   = useState("")
+  const [user,setUser]             = useState<{full_name?:string}>({})
+  const [company,setCompany]       = useState<{name?:string}>({})
 
   useEffect(()=>{
     try{setUser(JSON.parse(localStorage.getItem("hr_user")||"{}"))}catch{}
@@ -342,9 +363,9 @@ export default function HRAgent() {
   },[])
 
   const tabs=[
-    {id:"jd",    label:"JD Writer",       icon:"✦"},
-    {id:"screener",label:"Resume Screener",icon:">"},
-    {id:"pipeline",label:"Pipeline",       icon:"="},
+    {id:"jd",       label:"JD Writer",       icon:"✦"},
+    {id:"screener", label:"Resume Screener", icon:">"},
+    {id:"pipeline", label:"Pipeline",        icon:"="},
   ]
 
   return (
@@ -361,14 +382,8 @@ export default function HRAgent() {
               <div style={{fontSize:12,fontWeight:600,color:"#374151"}}>{user.full_name||""}</div>
               <div style={{fontSize:11,color:"#9ca3af"}}>{company.name||""}</div>
             </div>
-            <button
-              onClick={()=>{
-                localStorage.clear()
-                document.cookie="hr_token=;path=/;max-age=0"
-                window.location.href="/auth"
-              }}
-              style={{fontSize:12,color:"#6b7280",background:"none",border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 10px",cursor:"pointer"}}
-            >
+            <button onClick={()=>{localStorage.clear();document.cookie="hr_token=;path=/;max-age=0";window.location.href="/auth"}}
+              style={{fontSize:12,color:"#6b7280",background:"none",border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 10px",cursor:"pointer"}}>
               Logout
             </button>
           </div>
@@ -384,12 +399,16 @@ export default function HRAgent() {
         </div>
       </div>
       <div style={{maxWidth:1200,margin:"24px auto",padding:"0 24px"}}>
-        {tab==="jd" && <JDWriter/>}
-        {tab==="screener" && <ResumeScreener/>}
+        {tab==="jd"       && <JDWriter onJobCreated={setLastJobId}/>}
+        {tab==="screener" && <ResumeScreener initialJobId={lastJobId}/>}
         {tab==="pipeline" && (
           <div>
-            <h2 style={{margin:"0 0 16px",fontSize:16,fontWeight:700,color:"#111827"}}>Candidate Pipeline</h2>
-            <PipelineBoard/>
+            <h2 style={{margin:"0 0 4px",fontSize:16,fontWeight:700,color:"#111827"}}>Candidate Pipeline</h2>
+            {lastJobId
+              ? <p style={{margin:"0 0 16px",fontSize:12,color:"#9ca3af"}}>Showing real candidates for job: {lastJobId}</p>
+              : <p style={{margin:"0 0 16px",fontSize:12,color:"#9ca3af"}}>Generate a job first to see real candidates. Showing demo data.</p>
+            }
+            <PipelineBoard jobId={lastJobId}/>
           </div>
         )}
       </div>

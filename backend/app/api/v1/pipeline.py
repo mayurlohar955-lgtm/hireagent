@@ -1,6 +1,3 @@
-
-
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -10,19 +7,9 @@ from app.models.application import Application
 from app.models.candidate import Candidate
 from app.models.job import Job
 from app.models.enums import PipelineStage
-
+from app.api.deps import get_current_user, CurrentUser
 
 router = APIRouter()
-DEMO_TENANT = "tenant_demo"
-
-STAGE_ORDER = [
-    PipelineStage.applied,
-    PipelineStage.screening,
-    PipelineStage.interview,
-    PipelineStage.offer,
-    PipelineStage.hired,
-]
-
 
 class MoveStageRequest(BaseModel):
     stage: PipelineStage
@@ -30,28 +17,26 @@ class MoveStageRequest(BaseModel):
 
 
 @router.get("/{job_id}/board")
-async def get_pipeline_board(job_id: str, db: AsyncSession = Depends(get_db)):
-    # """
-    # Get the full Kanban board for a job.
-    # Returns candidates grouped by pipeline stage with scores.
-    # """
-    # Verify job
-    result = await db.execute(select(Job).where(Job.id == job_id, Job.tenant_id == DEMO_TENANT))
+async def get_pipeline_board(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.tenant_id == current_user.tenant_id)
+    )
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Fetch all applications with candidate data
     result = await db.execute(
         select(Application, Candidate)
         .join(Candidate, Application.candidate_id == Candidate.id)
-        .where(Application.job_id == job_id, Application.tenant_id == DEMO_TENANT)
+        .where(Application.job_id == job_id, Application.tenant_id == current_user.tenant_id)
     )
     rows = result.all()
 
-   
     board = {stage.value: [] for stage in PipelineStage}
-
     for app, cand in rows:
         board[app.stage.value].append({
             "application_id":   app.id,
@@ -59,7 +44,7 @@ async def get_pipeline_board(job_id: str, db: AsyncSession = Depends(get_db)):
             "name":             cand.name,
             "email":            cand.email,
             "experience_years": cand.experience_years,
-            "skills":           (cand.skills or [])[:5],  # top 5 skills only for board
+            "skills":           (cand.skills or [])[:5],
             "score_total":      app.score_total,
             "score_skills":     app.score_skills,
             "score_experience": app.score_experience,
@@ -72,11 +57,9 @@ async def get_pipeline_board(job_id: str, db: AsyncSession = Depends(get_db)):
             "updated_at":       app.updated_at.isoformat() if app.updated_at else None,
         })
 
-    
     for stage in board:
         board[stage].sort(key=lambda x: x["score_total"], reverse=True)
 
-    # Add column metadata
     column_meta = {
         "applied":   {"label": "Applied",   "color": "#6366f1"},
         "screening": {"label": "Screening", "color": "#f59e0b"},
@@ -87,17 +70,13 @@ async def get_pipeline_board(job_id: str, db: AsyncSession = Depends(get_db)):
     }
 
     return {
-        "job": {
-            "id":     job.id,
-            "title":  job.title,
-            "status": job.status,
-        },
+        "job": {"id": job.id, "title": job.title, "status": job.status},
         "columns": [
             {
                 **column_meta[stage],
-                "stage":  stage,
-                "count":  len(board[stage]),
-                "cards":  board[stage],
+                "stage": stage,
+                "count": len(board[stage]),
+                "cards": board[stage],
             }
             for stage in ["applied", "screening", "interview", "offer", "hired", "rejected"]
         ],
@@ -111,49 +90,38 @@ async def move_candidate_stage(
     application_id: str,
     req: MoveStageRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    # """Move a candidate to a different pipeline stage (drag-and-drop endpoint)."""
     result = await db.execute(
         select(Application).where(
             Application.id == application_id,
             Application.job_id == job_id,
-            Application.tenant_id == DEMO_TENANT,
+            Application.tenant_id == current_user.tenant_id,
         )
     )
     application = result.scalar_one_or_none()
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
-
     old_stage = application.stage
     application.stage = req.stage
     if req.notes:
         application.notes = req.notes
-
     await db.flush()
-
-    return {
-        "application_id": application_id,
-        "from_stage":     old_stage,
-        "to_stage":       req.stage,
-        "updated":        True,
-    }
+    return {"application_id": application_id, "from_stage": old_stage, "to_stage": req.stage, "updated": True}
 
 
 @router.get("/{job_id}/stats")
-async def get_pipeline_stats(job_id: str, db: AsyncSession = Depends(get_db)):
-    """Quick stats for the pipeline header — counts per stage and average score."""
+async def get_pipeline_stats(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     result = await db.execute(
         select(Application.stage, func.count(Application.id), func.avg(Application.score_total))
-        .where(Application.job_id == job_id, Application.tenant_id == DEMO_TENANT)
+        .where(Application.job_id == job_id, Application.tenant_id == current_user.tenant_id)
         .group_by(Application.stage)
     )
-    rows = result.all()
-
     stats = {}
-    for stage, count, avg_score in rows:
-        stats[stage.value] = {
-            "count":     count,
-            "avg_score": round(avg_score or 0, 1),
-        }
-
+    for stage, count, avg_score in result.all():
+        stats[stage.value] = {"count": count, "avg_score": round(avg_score or 0, 1)}
     return stats
